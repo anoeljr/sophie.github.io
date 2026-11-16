@@ -309,7 +309,30 @@ function stopIntro() {
   g.gain.setTargetAtTime(0, t, 0.08); try { s.stop(t + 0.5); } catch (e) { }
   introSrc = null; introGain = null;
 }
-function stopChip() { if (musicTimer) { clearInterval(musicTimer); musicTimer = null; } }
+function stopChip() { if (musicTimer) { clearInterval(musicTimer); musicTimer = null; } if (bossTimer) { clearInterval(bossTimer); bossTimer = null; } }
+/* música do chefe (sintetizada) */
+let bossTimer = null, bossStep = 0.115;
+const BMEL = [69, 0, 72, 0, 71, 0, 68, 0, 69, 0, 72, 0, 76, 0, 75, 0,
+  69, 0, 72, 0, 71, 0, 68, 0, 69, 0, 65, 0, 64, 0, 63, 0,
+  74, 0, 77, 0, 76, 0, 73, 0, 74, 0, 77, 0, 81, 0, 80, 0,
+  76, 0, 75, 0, 76, 0, 80, 0, 81, 0, 80, 0, 76, 0, 71, 0];
+const BBASS = [33, 33, 38, 40];
+function startBossMusic() {
+  if (!AC || bossTimer) return;
+  let nx = AC.currentTime + 0.08, st = 0;
+  bossTimer = setInterval(() => {
+    if (!AC) return;
+    if (nx < AC.currentTime - 0.5) nx = AC.currentTime + 0.05;
+    while (nx < AC.currentTime + 0.15) {
+      const m = BMEL[st], root = BBASS[st >> 4];
+      if (m) osc(mtof(m), nx, bossStep * 1.4, 'square', 0.03);
+      osc(mtof(root + ((st & 3) === 2 ? 12 : 0)), nx, bossStep * 0.9, 'sawtooth', 0.045);
+      if ((st & 3) === 0) osc(130, nx, 0.1, 'triangle', 0.22, 42);
+      if ((st & 7) === 4) osc(1800, nx, 0.03, 'square', 0.012);
+      nx += bossStep; st = (st + 1) % 64;
+    }
+  }, 40);
+}
 function setMusic(mode) { if (mode === musicMode) return; musicMode = mode; updateMusic(); }
 function updateMusic() {
   if (!AC) return;
@@ -323,6 +346,8 @@ function updateMusic() {
       introSrc.connect(introGain); introGain.connect(master); introSrc.start(0, lead);
     }
   } else if (musicMode === 'none') { stopIntro(); stopChip(); stopTrack(true); }
+  else if (musicMode === 'hush') { stopIntro(); stopChip(); stopTrack(false); }
+  else if (musicMode === 'boss') { stopIntro(); stopChip(); stopTrack(false); startBossMusic(); }
   else { stopIntro(); stopChip(); ensureTrack(); }
 }
 /* música de fundo de cada fase (arquivos ao lado da página) */
@@ -395,6 +420,7 @@ function sfx(n) {
     case 'select': osc(660, t, 0.08, 'square', 0.05); break;
     case 'tick': osc(1200, t, 0.03, 'square', 0.03); break;
     case 'alarm': [220, 185, 220, 185].forEach((f, i) => osc(f, t + i * 0.16, 0.14, 'sawtooth', 0.07)); break;
+    case 'roar': osc(95, t, 0.9, 'sawtooth', 0.16, 34); osc(62, t, 0.9, 'square', 0.1, 30); osc(300, t, 0.25, 'sawtooth', 0.06, 80); break;
     case 'whoosh': osc(900, t, 0.18, 'triangle', 0.08, 300); break;
     case 'pound': osc(160, t, 0.25, 'square', 0.12, 40); osc(90, t, 0.3, 'triangle', 0.2, 35); break;
     case 'gameover': [392, 370, 349, 330, 311, 294].forEach((f, i) => osc(f, t + i * 0.22, 0.3, 'square', 0.06)); osc(262, t + 1.35, 0.9, 'triangle', 0.12, 130); break;
@@ -644,12 +670,13 @@ function updateEnemies() {
 }
 
 /* ---------- chefe: TV GIGANTE ---------- */
+const BOSS_INTRO = 260;
 function resetBoss(l) {
   const b = l.boss;
   if (!b || b.st === 'dead') return;
   if (b.walled) for (let y = 0; y < 10; y++) l.g[y][b.a - 1] = ' ';
   l.ents = l.ents.filter(e => !e.minion);
-  Object.assign(b, { x: b.maxX, y: 10 * T - b.h, hp: 3, st: 'sleep', t: 0, dir: -1, vy: 0, anim: 0, waves: [], walled: false, hintT: 0, atk: 0, next: 'spawn', jdir: 0, deadT: 0 });
+  Object.assign(b, { x: b.maxX, y: 10 * T - b.h, hp: 3, st: 'sleep', t: 0, dir: -1, vy: 0, anim: 0, waves: [], walled: false, hintT: 0, tip: 0, dark: 0, atk: 0, next: 'spawn', jdir: 0, deadT: 0 });
 }
 function bossMinion(b) {
   let n = 0;
@@ -676,9 +703,9 @@ function bossHit(b) {
   p.vx = (p.x + p.w / 2 < b.x + b.w / 2 ? -1 : 1) * 2; p.inv = Math.max(p.inv, 95);
   b.waves = [];
   if (b.hp <= 0) {
-    b.st = 'dying'; b.t = 120;
+    b.st = 'dying'; b.t = 120; setMusic('hush');
     for (const e of lv.ents) if (e.minion && e.alive) killEnemy(e, true);
-  } else { b.st = 'hurt'; b.t = 70; }
+  } else { b.st = 'hurt'; b.t = 70; if (b.hp === 1) bossStep = 0.095; }
 }
 function updateBoss() {
   const b = lv.boss, p = player;
@@ -686,18 +713,22 @@ function updateBoss() {
   const gy = 10 * T - b.h;
   if (b.st === 'dead') {
     if (b.deadT > 0) b.deadT--;
-    if (lv.goal && lv.goal.fall > 0) { lv.goal.fall = Math.max(0, lv.goal.fall - 2); if (!lv.goal.fall) { sfx('cp'); sparkle(lv.goal.x + 8, 10 * T - 50, 14, '#ffd23f'); } }
+    if (b.dark > 0) b.dark = Math.max(0, b.dark - 0.02);
+    if (lv.goal && lv.goal.fall > 0) { lv.goal.fall = Math.max(0, lv.goal.fall - 2); if (!lv.goal.fall) { setMusic('lvl'); sfx('cp'); sparkle(lv.goal.x + 8, 10 * T - 50, 14, '#ffd23f'); } }
     return;
   }
   if (b.st === 'sleep') {
+    setMusic(p.x > (b.a - 6) * T ? 'hush' : 'lvl');
     if (!p.dying && p.x > b.a * T + 8) {
-      b.st = 'intro'; b.t = 110; b.walled = true;
+      b.st = 'intro'; b.t = BOSS_INTRO; b.walled = true;
       for (let y = 0; y < 10; y++) lv.g[y][b.a - 1] = 'S';
-      shake = 8; sfx('alarm');
+      shake = 10; sfx('pound'); p.face = 1;
     }
     return;
   }
   if (b.hintT > 0) b.hintT--;
+  if (b.tip > 0) b.tip--;
+  if (b.dark < 1) b.dark = Math.min(1, b.dark + 0.02);
   // gravidade
   if (b.y < gy || b.vy < 0) {
     b.vy += 0.3; b.y += b.vy;
@@ -714,7 +745,15 @@ function updateBoss() {
   }
   b.t--;
   switch (b.st) {
-    case 'intro': if (b.t <= 0) { b.st = 'walk'; b.t = 120; } break;
+    case 'intro': {
+      const el = BOSS_INTRO - b.t;
+      if (el === 50 || el === 100) sfx('alarm');
+      if (el === 150) sfx('whoosh');
+      if (el === 170) { shake = 26; sfx('roar'); }
+      if (el === 236) { bossStep = 0.115; setMusic('boss'); }
+      if (b.t <= 0) { b.st = 'walk'; b.t = 120; b.tip = 200; }
+      break;
+    }
     case 'walk': {
       const sp = 0.55 + (3 - b.hp) * 0.25;
       b.x += b.dir * sp; b.anim += sp * 0.25;
@@ -731,7 +770,7 @@ function updateBoss() {
     case 'hurt':
       if (b.t <= 0) {
         b.st = 'walk'; b.t = 70;
-        if (!b.batL && b.hp === 2) bossBat(b, b.a + 3); else if (b.hp === 1) bossBat(b, lv.w - 4);
+        if (b.hp === 2) bossBat(b, b.a + 3); else if (b.hp === 1) bossBat(b, lv.w - 4);
       }
       break;
     case 'dying':
@@ -753,7 +792,7 @@ function updateBoss() {
   }
   b.waves = b.waves.filter(w => w.x > b.a * T && w.x < lv.w * T);
   // contato com a jogadora
-  if (p.dying || b.st === 'dying' || b.st === 'hurt') return;
+  if (p.dying || b.st === 'dying' || b.st === 'hurt' || b.st === 'intro') return;
   if (p.x < b.x + b.w && p.x + p.w > b.x && p.y < b.y + b.h && p.y + p.h > b.y) {
     if (p.bund && p.vy > 0 && p.prevBottom <= b.y + 12) bossHit(b);
     else if (p.vy > 0 && p.prevBottom <= b.y + 7) {
@@ -779,7 +818,12 @@ function drawBoss(ox) {
       drawFrame('tvIdle', Math.floor(frame / 4), cx + jit, by, b.dir, SC);
       if ((frame >> 2) & 1) text('!', cx, b.y - 20, { size: 16, color: b.next === 'jump' ? '#22e4ff' : '#ffd23f' });
     } else if (b.st === 'sleep') { drawFrame('tvIdle', 0, cx, by, b.dir, SC); text('Zzz', cx + 14, b.y - 10 - (frame >> 4) % 3, { color: '#c8b4ff' }); }
-    else drawFrame('tvIdle', Math.floor(frame / 6), cx + (b.st === 'intro' ? jit : 0), by, b.dir, SC);
+    else if (b.st === 'intro') {
+      const el = BOSS_INTRO - b.t;
+      if (el < 150) { drawFrame('tvIdle', 0, cx, by, b.dir, SC); text('Zzz', cx + 14, b.y - 10 - (frame >> 4) % 3, { color: '#c8b4ff' }); }
+      else if (el < 170) { drawFrame('tvIdle', 1, cx, by, b.dir, SC); text('!', cx, b.y - 22, { size: 16, color: '#ff3d5f' }); }
+      else drawFrame('tvIdle', Math.floor(frame / 4), cx + jit * (el < 215 ? 2 : 1), by - (el < 215 && (frame & 4) ? 2 : 0), b.dir, SC);
+    } else drawFrame('tvIdle', Math.floor(frame / 6), cx, by, b.dir, SC);
   }
   for (const w of b.waves) {
     const x = w.x - ox;
@@ -789,16 +833,36 @@ function drawBoss(ox) {
     }
   }
 }
+function drawBossTint() {
+  const b = lv.boss;
+  if (b && b.dark > 0) rect(0, 0, W, H, 'rgba(48,0,22,' + (0.34 * b.dark).toFixed(3) + ')');
+}
 function drawBossHUD() {
   const b = lv.boss;
-  if (!b || b.st === 'sleep' || b.st === 'dead' || state !== 'play') return;
+  if (!b || b.st === 'sleep' || b.st === 'dead' || b.st === 'intro' || state !== 'play') return;
   const bw = 22, sx = Math.round(W / 2 - (3 * bw + 6) / 2);
   text('TV GIGANTE', W / 2, 19, { color: '#ff9ccc' });
   for (let i = 0; i < 3; i++) { rect(sx + i * (bw + 3) - 1, 29, bw + 2, 7, '#0e0720'); rect(sx + i * (bw + 3), 30, bw, 5, i < b.hp ? '#ff4fa3' : '#2b1d45'); }
-  if (b.st === 'intro') {
-    if ((frame >> 3) & 1) text('CHEFÃO!', W / 2, 46, { size: 16, color: '#ffd23f', shadowColor: '#3a0a40' });
-    text('Acerte com a BUNDADA!', W / 2, 68, { color: '#ffffff' });
+  if (b.tip > 0 && (b.tip > 40 || (frame >> 2) & 1)) text('Acerte com a BUNDADA!', W / 2, 44, { color: '#ffffff' });
+}
+function drawBossCine() {
+  const b = lv.boss;
+  if (!b || b.st !== 'intro' || state !== 'play') return;
+  const el = BOSS_INTRO - b.t;
+  const k = clamp(Math.min(el / 25, (BOSS_INTRO - el) / 20), 0, 1), bh = Math.round(22 * k);
+  if (el >= 50 && el < 150) {
+    rect(0, 0, W, H, 'rgba(255,0,60,' + (0.13 + 0.11 * Math.sin(el * 0.25)).toFixed(3) + ')');
+    rect(0, 42, W, 34, 'rgba(20,0,8,.88)');
+    for (let x = -16 - (el % 16); x < W + 16; x += 16) { rect(x, 38, 8, 4, '#ffd23f'); rect(x + 8, 38, 8, 4, '#1a0b10'); rect(W - x - 8, 76, 8, 4, '#ffd23f'); rect(W - x - 16, 76, 8, 4, '#1a0b10'); }
+    if ((el >> 3) & 1) text('ATENÇÃO!', W / 2, 51, { size: 16, color: '#ff3d5f', shadowColor: '#000' });
   }
+  if (el >= 170) {
+    const sl = Math.max(0, 185 - el) * 22;
+    rect(0, 32, W, 44, 'rgba(10,4,24,.88)'); rect(0, 32, W, 2, '#ff4fa3'); rect(0, 74, W, 2, '#ff4fa3');
+    text('TV GIGANTE', W / 2 - sl, 39, { size: 16, color: '#ff4fa3', shadowColor: '#3a0a40' });
+    text('A RAINHA DA FOFOCA', W / 2 + sl, 61, { color: '#ffd23f' });
+  }
+  rect(0, 0, W, bh, '#000'); rect(0, H - bh, W, bh, '#000');
 }
 
 /* ---------- jogadora ---------- */
@@ -847,7 +911,9 @@ function updatePlayer() {
     if (p.dying <= 0) { if (hearts <= 0) gameOver(); else respawn(); }
     return;
   }
-  let dir = (keys.right ? 1 : 0) - (keys.left ? 1 : 0);
+  const lock = !!(lv.boss && lv.boss.st === 'intro');
+  if (lock) { input.down = false; input.jumpPressed = false; }
+  let dir = lock ? 0 : (keys.right ? 1 : 0) - (keys.left ? 1 : 0);
   if (p.knock > 0) { p.knock--; dir = 0; if (p.knock === 0) p.rec = 20; }
   else if (p.bund) { p.vx *= 0.7; }
   else {
@@ -1375,6 +1441,7 @@ function drawGame() {
   let ox = Math.round(cam.x);
   if (shake > 0) { shake--; ox += (shake & 2) ? 2 : -2; }
   drawBG(theme, lv.bg, ox, frame);
+  drawBossTint();
   drawLevel(ox);
   drawEntities(ox);
   drawBoss(ox);
@@ -1382,6 +1449,7 @@ function drawGame() {
   if (state === 'play') drawParticles(ox);
   drawHUD();
   drawBossHUD();
+  drawBossCine();
 }
 
 /* ---------- loop ---------- */
@@ -1418,7 +1486,7 @@ function update() {
       if (!player.dying) {
         const hi = lv.w * T - W, bs = lv.boss;
         const lo = bs && bs.walled ? Math.min((bs.a - 1) * T, hi) : 0;
-        const target = clamp(player.x - W * 0.42, lo, hi);
+        const target = clamp(bs && bs.st === 'intro' ? bs.x + bs.w / 2 - W * 0.62 : player.x - W * 0.42, lo, hi);
         cam.x += (target - cam.x) * 0.15;
         cam.x = clamp(cam.x, 0, hi);
       }
@@ -1470,7 +1538,7 @@ if (document.fonts && document.fonts.load) {
 cv.focus();
 
 /* ganchos para teste */
-window.__game = { get state() { return state; }, get stateT() { return stateT; }, set stateT(v) { stateT = v; }, get hearts() { return hearts; }, set hearts(v) { hearts = v; }, get stats() { return stats; }, get cam() { return cam; }, get player() { return player; }, loadLevel, setState, get lv() { return lv; }, keys: kb, input };
+window.__game = { get state() { return state; }, get stateT() { return stateT; }, set stateT(v) { stateT = v; }, get hearts() { return hearts; }, set hearts(v) { hearts = v; }, get stats() { return stats; }, get cam() { return cam; }, get music() { return musicMode; }, get player() { return player; }, loadLevel, setState, get lv() { return lv; }, keys: kb, input };
 </script>
 </body>
 </html>
